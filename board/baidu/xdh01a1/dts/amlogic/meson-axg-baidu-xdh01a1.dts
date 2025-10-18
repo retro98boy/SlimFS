@@ -1,0 +1,436 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2025 retro98boy <retro98boy@qq.com>
+ */
+
+/dts-v1/;
+
+#include "meson-axg.dtsi"
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	compatible = "baidu,xdh01a1", "amlogic,a113x", "amlogic,meson-axg";
+	model = "Baidu XDH01A1";
+
+	aliases {
+		serial0 = &uart_AO;
+		serial1 = &uart_A;
+	};
+
+	gpio-keys-polled {
+		compatible = "gpio-keys-polled";
+		poll-interval = <100>;
+
+		voice-btn {
+			label = "voice-btn";
+			linux,code = <KEY_VOICECOMMAND>;
+			gpios = <&gpio_ao GPIOAO_13 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	adc-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 0>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1000000>;
+
+		button-up {
+			label = "Volume Up";
+			linux,code = <KEY_VOLUMEUP>;
+			press-threshold-microvolt = <0>;
+		};
+
+		button-pause {
+			label = "Play Pause";
+			linux,code = <KEY_PLAYPAUSE>;
+			press-threshold-microvolt = <248791>;
+		};
+
+		button-down {
+			label = "Volume Down";
+			linux,code = <KEY_VOLUMEDOWN>;
+			press-threshold-microvolt = <471208>;
+		};
+	};
+
+	pwm-leds {
+		compatible = "pwm-leds-multicolor";
+
+		multi-led {
+			color = <LED_COLOR_ID_RGB>;
+			max-brightness = <255>;
+
+			led-red {
+				color = <LED_COLOR_ID_RED>;
+				pwms = <&pwm_cd 0 1000000 0>;
+			};
+
+			led-green {
+				color = <LED_COLOR_ID_GREEN>;
+				pwms = <&pwm_cd 1 1000000 0>;
+			};
+
+			led-blue {
+				color = <LED_COLOR_ID_BLUE>;
+				pwms = <&pwm_ab 1 1000000 0>;
+			};
+		};
+	};
+
+	ad52068: amplifier {
+		compatible = "simple-audio-amplifier";
+		enable-gpios = <&gpio GPIOA_3 GPIO_ACTIVE_HIGH>;
+		/*
+		 * Ensure that the /SD pin of the AD52068 is pulled high after a certain delay following the audio output.
+		 * Without this delay, the device will shut down the moment the audio plays,
+		 * accompanied by a clicking sound from the speaker.
+		 */
+		enable-delay-ms = <100>;
+		sound-name-prefix = "Amplifier";
+	};
+
+	es7149: codec {
+		#sound-dai-cells = <0>;
+		compatible = "everest,es7144";
+		sound-name-prefix = "Codec";
+	};
+
+	dmics: dmics {
+		#sound-dai-cells = <0>;
+		compatible = "dmic-codec";
+		num-channels = <7>;
+		wakeup-delay-ms = <50>;
+		sound-name-prefix = "MIC";
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		kaslr-seed = <0xfeedbeef 0xc0def00d>;
+	};
+
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x0 0x0 0x08000000>;
+	};
+
+	vddao_3v3: regulator-vddao-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "VDDAO_3V3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	vddio_ao18: regulator-vddio-ao18 {
+		compatible = "regulator-fixed";
+		regulator-name = "VDDIO_AO18";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vddao_3v3>;
+		regulator-always-on;
+	};
+
+	vddio_boot: regulator-vddio-boot {
+		compatible = "regulator-fixed";
+		regulator-name = "VDDIO_BOOT";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vddao_3v3>;
+		regulator-always-on;
+	};
+
+	usb_pwr: regulator-usb-pwr {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_pwr";
+	};
+
+	/* This regulator is needed by vcc_amp and the AD52068 /SD pin. */
+	unknown_pwr: regulator-unknown-pwr {
+		compatible = "regulator-fixed";
+		regulator-name = "unknown_pwr";
+		enable-active-low;
+		gpio = <&gpio_ao GPIOAO_12 GPIO_ACTIVE_LOW>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/* Ensure that it is enabled immediately upon power-up. */
+	vcc_amp: regulator-vcc-amp {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_amp";
+		regulator-min-microvolt = <12000000>;
+		regulator-max-microvolt = <12000000>;
+		enable-active-high;
+		gpio = <&gpio GPIOA_2 GPIO_ACTIVE_HIGH>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gpio GPIOX_7 GPIO_ACTIVE_LOW>;
+		clocks = <&wifi32k>;
+		clock-names = "ext_clock";
+	};
+
+	sound {
+		compatible = "amlogic,axg-sound-card";
+		model = "baidu-xdh01a1";
+		audio-aux-devs = <&tdmout_b>, <&ad52068>;
+		audio-widgets = "Speaker", "Mono Speaker";
+		audio-routing = "TDMOUT_B IN 0", "FRDDR_A OUT 1",
+				"TDMOUT_B IN 1", "FRDDR_B OUT 1",
+				"TDMOUT_B IN 2", "FRDDR_C OUT 1",
+				"TDM_B Playback", "TDMOUT_B OUT",
+				"TODDR_A IN 4", "PDM Capture",
+				"TODDR_B IN 4", "PDM Capture",
+				"TODDR_C IN 4", "PDM Capture",
+				"Amplifier INL", "Codec AOUTL",
+				"Amplifier INR", "Codec AOUTR",
+				"Mono Speaker", "Amplifier OUTL",
+				"Mono Speaker", "Amplifier OUTR";
+		clocks = <&clkc CLKID_HIFI_PLL>,
+			 <&clkc CLKID_MPLL0>,
+			 <&clkc CLKID_MPLL1>;
+
+		assigned-clocks = <&clkc CLKID_HIFI_PLL>,
+				  <&clkc CLKID_MPLL0>,
+				  <&clkc CLKID_MPLL1>;
+		assigned-clock-parents = <0>, <0>, <0>;
+		assigned-clock-rates = <589824000>,
+				       <270950400>,
+				       <393216000>;
+
+		dai-link-0 {
+			sound-dai = <&frddr_a>;
+		};
+
+		dai-link-1 {
+			sound-dai = <&frddr_b>;
+		};
+
+		dai-link-2 {
+			sound-dai = <&frddr_c>;
+		};
+
+		dai-link-3 {
+			sound-dai = <&toddr_a>;
+		};
+
+		dai-link-4 {
+			sound-dai = <&toddr_b>;
+		};
+
+		dai-link-5 {
+			sound-dai = <&toddr_c>;
+		};
+
+		dai-link-6 {
+			sound-dai = <&tdmif_b>;
+			dai-format = "i2s";
+			dai-tdm-slot-tx-mask-0 = <1 1>;
+			mclk-fs = <256>;
+
+			codec {
+				sound-dai = <&es7149>;
+			};
+		};
+
+		dai-link-7 {
+			sound-dai = <&pdm>;
+
+			codec {
+				sound-dai = <&dmics>;
+			};
+		};
+	};
+
+	wifi32k: wifi32k {
+		compatible = "pwm-clock";
+		#clock-cells = <0>;
+		clock-frequency = <32768>;
+		pwms = <&pwm_ab 0 30518 0>; /* PWM_A at 32.768KHz */
+	};
+};
+
+&frddr_a {
+	status = "okay";
+};
+
+&frddr_b {
+	status = "okay";
+};
+
+&frddr_c {
+	status = "okay";
+};
+
+&nfc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	nand@0 {
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		nand-is-boot-medium;
+		amlogic,boot-pages = <1024>; /* not sure */
+		amlogic,boot-page-step = <2>; /* not sure */
+
+		nand-ecc-mode = "hw";
+		/*
+		 * Only setting it to 512 instead of 1024
+		 * allows normal access to the vendor's original block data.
+		 */
+		nand-ecc-step-size = <512>;
+		nand-ecc-strength = <8>;
+		/*
+		nand-on-flash-bbt;
+		nand-bbt-offset = <0x240000>;
+		nand-bbt-size = <0x400>;
+		*/
+
+		/*
+		partition@0 {
+			label = "bootloader";
+			reg = <0x00000000 0x00200000>;
+		};
+		*/
+
+		partition@440000 {
+			label = "tpl";
+			reg = <0x00440000 0x00200000>;
+		};
+
+		partition@640000 {
+			label = "boot0";
+			reg = <0x00640000 0x00400000>;
+		};
+
+		partition@a40000 {
+			label = "boot1";
+			reg = <0x00a40000 0x00400000>;
+		};
+
+		partition@e40000 {
+			label = "system0";
+			reg = <0x00e40000 0x01400000>;
+		};
+
+		partition@2240000 {
+			label = "system1";
+			reg = <0x02240000 0x01400000>;
+		};
+
+		partition@3640000 {
+			label = "opt";
+			reg = <0x03640000 0x03600000>;
+		};
+
+		partition@6c40000 {
+			label = "data";
+			reg = <0x06c40000 0x013c0000>;
+		};
+	};
+};
+
+&pdm {
+	pinctrl-0 = <&pdm_dclk_a14_pins>, <&pdm_din0_pins>,
+		    <&pdm_din1_pins>, <&pdm_din2_pins>, <&pdm_din3_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&pwm_ab {
+	status = "okay";
+	pinctrl-0 = <&pwm_a_x20_pins>, <&pwm_b_x_pins>;
+	pinctrl-names = "default";
+};
+
+&pwm_cd {
+	status = "okay";
+	pinctrl-0 = <&pwm_c_x17_pins>, <&pwm_d_x16_pins>;
+	pinctrl-names = "default";
+};
+
+&saradc {
+	status = "okay";
+	vref-supply = <&vddio_ao18>;
+};
+
+&sd_emmc_b {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	pinctrl-0 = <&sdio_pins>;
+	pinctrl-1 = <&sdio_clk_gate_pins>;
+	pinctrl-names = "default", "clk-gate";
+
+	bus-width = <4>;
+	cap-sd-highspeed;
+	sd-uhs-sdr104;
+	max-frequency = <200000000>;
+	non-removable;
+	disable-wp;
+
+	mmc-pwrseq = <&sdio_pwrseq>;
+
+	vmmc-supply = <&vddao_3v3>;
+	vqmmc-supply = <&vddio_boot>;
+
+	brcmf: wifi@1 {
+		reg = <1>;
+		compatible = "brcm,bcm4329-fmac";
+	};
+};
+
+&tdmif_b {
+	pinctrl-0 = <&tdmb_sclk_pins>, <&tdmb_fs_pins>,
+		    <&tdmb_dout0_pins>, <&mclk_b_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&tdmout_b {
+	status = "okay";
+};
+
+&toddr_a {
+	status = "okay";
+};
+
+&toddr_b {
+	status = "okay";
+};
+
+&toddr_c {
+	status = "okay";
+};
+
+&uart_A {
+	status = "okay";
+	pinctrl-0 = <&uart_a_pins>, <&uart_a_cts_rts_pins>;
+	pinctrl-names = "default";
+	uart-has-rtscts;
+
+	bluetooth {
+		compatible = "brcm,bcm43438-bt";
+		shutdown-gpios = <&gpio GPIOX_21 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&uart_AO {
+	status = "okay";
+	pinctrl-0 = <&uart_ao_a_pins>;
+	pinctrl-names = "default";
+};
+
+&usb {
+	status = "okay";
+	dr_mode = "host";
+	vbus-supply = <&usb_pwr>;
+};

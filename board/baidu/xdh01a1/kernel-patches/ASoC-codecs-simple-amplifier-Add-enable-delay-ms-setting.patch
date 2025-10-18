@@ -1,0 +1,111 @@
+From a60f234442f621c94d2eb2a63e8abf7427909809 Mon Sep 17 00:00:00 2001
+From: retro98boy <retro98boy@qq.com>
+Date: Sat, 25 Oct 2025 18:38:00 +0800
+Subject: [PATCH] ASoC: codecs: simple-amplifier: Add enable-delay-ms setting
+
+---
+ sound/soc/codecs/simple-amplifier.c | 39 +++++++++++++++++++++++++----
+ 1 file changed, 34 insertions(+), 5 deletions(-)
+
+diff --git a/sound/soc/codecs/simple-amplifier.c b/sound/soc/codecs/simple-amplifier.c
+index d306c585b..acd735784 100644
+--- a/sound/soc/codecs/simple-amplifier.c
++++ b/sound/soc/codecs/simple-amplifier.c
+@@ -8,34 +8,47 @@
+ #include <linux/module.h>
+ #include <linux/regulator/consumer.h>
+ #include <sound/soc.h>
++#include <linux/workqueue.h>
+ 
+ #define DRV_NAME "simple-amplifier"
+ 
+ struct simple_amp {
+ 	struct gpio_desc *gpiod_enable;
++	struct delayed_work enable_work;
++	u32 enable_delay_ms;
+ };
+ 
++static void enable_work_fn(struct work_struct *work)
++{
++	struct simple_amp *priv = container_of(to_delayed_work(work),
++					       struct simple_amp, enable_work);
++	gpiod_set_value_cansleep(priv->gpiod_enable, 1);
++}
++
+ static int drv_event(struct snd_soc_dapm_widget *w,
+ 		     struct snd_kcontrol *control, int event)
+ {
+ 	struct snd_soc_component *c = snd_soc_dapm_to_component(w->dapm);
+ 	struct simple_amp *priv = snd_soc_component_get_drvdata(c);
+-	int val;
+ 
+ 	switch (event) {
+ 	case SND_SOC_DAPM_POST_PMU:
+-		val = 1;
++		if (priv->enable_delay_ms) {
++			schedule_delayed_work(&priv->enable_work,
++					      msecs_to_jiffies(priv->enable_delay_ms));
++		} else {
++			gpiod_set_value_cansleep(priv->gpiod_enable, 1);
++		}
+ 		break;
+ 	case SND_SOC_DAPM_PRE_PMD:
+-		val = 0;
++		cancel_delayed_work_sync(&priv->enable_work);
++		gpiod_set_value_cansleep(priv->gpiod_enable, 0);
+ 		break;
+ 	default:
+ 		WARN(1, "Unexpected event");
+ 		return -EINVAL;
+ 	}
+ 
+-	gpiod_set_value_cansleep(priv->gpiod_enable, val);
+-
+ 	return 0;
+ }
+ 
+@@ -69,6 +82,7 @@ static int simple_amp_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+ 	struct simple_amp *priv;
++	u32 val;
+ 
+ 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+ 	if (priv == NULL)
+@@ -81,11 +95,25 @@ static int simple_amp_probe(struct platform_device *pdev)
+ 		return dev_err_probe(dev, PTR_ERR(priv->gpiod_enable),
+ 				     "Failed to get 'enable' gpio");
+ 
++	INIT_DELAYED_WORK(&priv->enable_work, enable_work_fn);
++
++	if (device_property_read_u32(dev, "enable-delay-ms", &val) == 0)
++		priv->enable_delay_ms = val;
++	else
++		priv->enable_delay_ms = 0;
++
+ 	return devm_snd_soc_register_component(dev,
+ 					       &simple_amp_component_driver,
+ 					       NULL, 0);
+ }
+ 
++static void simple_amp_remove(struct platform_device *pdev)
++{
++	struct simple_amp *priv = platform_get_drvdata(pdev);
++
++	cancel_delayed_work_sync(&priv->enable_work);
++}
++
+ #ifdef CONFIG_OF
+ static const struct of_device_id simple_amp_ids[] = {
+ 	{ .compatible = "dioo,dio2125", },
+@@ -101,6 +129,7 @@ static struct platform_driver simple_amp_driver = {
+ 		.of_match_table = of_match_ptr(simple_amp_ids),
+ 	},
+ 	.probe = simple_amp_probe,
++	.remove = simple_amp_remove,
+ };
+ 
+ module_platform_driver(simple_amp_driver);
+-- 
+2.51.1
+
