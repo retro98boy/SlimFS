@@ -99,7 +99,7 @@
 	dmics: dmics {
 		#sound-dai-cells = <0>;
 		compatible = "dmic-codec";
-		num-channels = <7>;
+		num-channels = <3>;
 		wakeup-delay-ms = <50>;
 		sound-name-prefix = "MIC";
 	};
